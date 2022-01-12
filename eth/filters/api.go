@@ -37,6 +37,7 @@ import (
 
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/interfaces"
+	"github.com/ava-labs/coreth/internal/ethapi"
 	"github.com/ava-labs/coreth/rpc"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -115,7 +116,7 @@ func (api *FilterAPI) timeoutLoop(timeout time.Duration) {
 func (api *FilterAPI) NewPendingTransactionFilter() rpc.ID {
 	var (
 		pendingTxs   = make(chan []common.Hash)
-		pendingTxSub = api.events.SubscribePendingTxs(pendingTxs)
+		pendingTxSub = api.events.SubscribePendingTxs(interfaces.FilterQuery{}, pendingTxs)
 	)
 
 	api.filtersMu.Lock()
@@ -145,7 +146,7 @@ func (api *FilterAPI) NewPendingTransactionFilter() rpc.ID {
 
 // NewPendingTransactions creates a subscription that is triggered each time a transaction
 // enters the transaction pool and was signed from one of the transactions this nodes manages.
-func (api *FilterAPI) NewPendingTransactions(ctx context.Context) (*rpc.Subscription, error) {
+func (api *FilterAPI) NewPendingTransactions(ctx context.Context, crit FilterCriteria) (*rpc.Subscription, error) {
 	notifier, supported := rpc.NotifierFromContext(ctx)
 	if !supported {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
@@ -155,7 +156,7 @@ func (api *FilterAPI) NewPendingTransactions(ctx context.Context) (*rpc.Subscrip
 
 	go func() {
 		txHashes := make(chan []common.Hash, 128)
-		pendingTxSub := api.events.SubscribePendingTxs(txHashes)
+		pendingTxSub := api.events.SubscribePendingTxs(interfaces.FilterQuery(crit), txHashes)
 
 		for {
 			select {
@@ -164,6 +165,44 @@ func (api *FilterAPI) NewPendingTransactions(ctx context.Context) (*rpc.Subscrip
 				// TODO(rjl493456442) Send a batch of tx hashes in one notification
 				for _, h := range hashes {
 					notifier.Notify(rpcSub.ID, h)
+				}
+			case <-rpcSub.Err():
+				pendingTxSub.Unsubscribe()
+				return
+			case <-notifier.Closed():
+				pendingTxSub.Unsubscribe()
+				return
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
+// NewPendingFullTransactions creates a subscription that is triggered each time a transaction
+// enters the transaction pool and was signed from one of the transactions this nodes manages.
+func (api *FilterAPI) NewPendingFullTransactions(ctx context.Context, crit FilterCriteria) (*rpc.Subscription, error) {
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	go func() {
+		pendingTxs := make(chan []*types.Transaction, 128)
+		pendingTxSub := api.events.SubscribePendingFullTxs(interfaces.FilterQuery(crit), pendingTxs)
+
+		for {
+			select {
+			case txns := <-pendingTxs:
+				// To keep the original behaviour, send a single tx in one notification.
+				// TODO(rjl493456442) Send a batch of txs in one notification
+				for _, tx := range txns {
+					if tx != nil {
+						t := ethapi.NewRPCPendingTransaction(tx, api.sys.backend.CurrentHeader(), nil, api.sys.backend.ChainConfig())
+						notifier.Notify(rpcSub.ID, &t)
+					}
 				}
 			case <-rpcSub.Err():
 				pendingTxSub.Unsubscribe()

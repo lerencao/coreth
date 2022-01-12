@@ -172,7 +172,7 @@ func (ec *Client) MemStats(ctx context.Context) (*runtime.MemStats, error) {
 
 // SubscribePendingTransactions subscribes to new pending transactions.
 func (ec *Client) SubscribePendingTransactions(ctx context.Context, ch chan<- common.Hash) (*rpc.ClientSubscription, error) {
-	return ec.c.EthSubscribe(ctx, ch, "newPendingTransactions")
+	return ec.c.EthSubscribe(ctx, ch, "newPendingTransactions", map[string]interface{}{})
 }
 
 func toCallArg(msg interfaces.CallMsg) interface{} {

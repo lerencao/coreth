@@ -31,21 +31,18 @@ package filters
 import (
 	"context"
 	"fmt"
-	"sync"
-	"time"
-
 	"github.com/ava-labs/coreth/core"
-	"github.com/ava-labs/coreth/core/bloombits"
 	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ava-labs/coreth/core/types"
-	"github.com/ava-labs/coreth/core/vm"
-	"github.com/ava-labs/coreth/ethdb"
+	"github.com/ava-labs/coreth/eth/filters/backend"
 	"github.com/ava-labs/coreth/interfaces"
 	"github.com/ava-labs/coreth/rpc"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	lru "github.com/hashicorp/golang-lru"
+	"sync"
+	"time"
 )
 
 // Config represents the configuration of the filter system.
@@ -64,42 +61,15 @@ func (cfg Config) withDefaults() Config {
 	return cfg
 }
 
-type Backend interface {
-	ChainDb() ethdb.Database
-	HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error)
-	HeaderByHash(ctx context.Context, blockHash common.Hash) (*types.Header, error)
-	GetReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, error)
-	GetLogs(ctx context.Context, blockHash common.Hash, number uint64) ([][]*types.Log, error)
-
-	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
-	SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription
-	SubscribeChainAcceptedEvent(ch chan<- core.ChainEvent) event.Subscription
-	SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription
-	SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription
-	SubscribeAcceptedLogsEvent(ch chan<- []*types.Log) event.Subscription
-
-	SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription
-
-	SubscribeAcceptedTransactionEvent(ch chan<- core.NewTxsEvent) event.Subscription
-
-	BloomStatus() (uint64, uint64)
-	ServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
-
-	// Added to the backend interface to support limiting of logs requests
-	GetVMConfig() *vm.Config
-	LastAcceptedBlock() *types.Block
-	GetMaxBlocksPerRequest() int64
-}
-
 // FilterSystem holds resources shared by all filters.
 type FilterSystem struct {
-	backend   Backend
+	backend   backend.Backend
 	logsCache *lru.Cache
 	cfg       *Config
 }
 
 // NewFilterSystem creates a filter system.
-func NewFilterSystem(backend Backend, config Config) *FilterSystem {
+func NewFilterSystem(backend backend.Backend, config Config) *FilterSystem {
 	config = config.withDefaults()
 
 	cache, err := lru.New(config.LogCacheSize)
@@ -172,21 +142,24 @@ const (
 )
 
 type subscription struct {
-	id        rpc.ID
-	typ       Type
-	created   time.Time
-	logsCrit  interfaces.FilterQuery
-	logs      chan []*types.Log
-	hashes    chan []common.Hash
-	headers   chan *types.Header
-	installed chan struct{} // closed when the filter is installed
-	err       chan error    // closed when the filter is uninstalled
+	id             rpc.ID
+	typ            Type
+	created        time.Time
+	logsCrit       interfaces.FilterQuery
+	pendingTxnCrit interfaces.FilterQuery
+	fullPendingTx  bool
+	logs           chan []*types.Log
+	hashes         chan []common.Hash
+	txs            chan []*types.Transaction
+	headers        chan *types.Header
+	installed      chan struct{} // closed when the filter is installed
+	err            chan error    // closed when the filter is uninstalled
 }
 
 // EventSystem creates subscriptions, processes events and broadcasts them to the
 // subscription which match the subscription criteria.
 type EventSystem struct {
-	backend   Backend
+	backend   backend.Backend
 	sys       *FilterSystem
 	lightMode bool
 	lastHead  *types.Header
@@ -283,6 +256,7 @@ func (sub *Subscription) Unsubscribe() {
 				break uninstallLoop
 			case <-sub.f.logs:
 			case <-sub.f.hashes:
+			case <-sub.f.txs:
 			case <-sub.f.headers:
 			}
 		}
@@ -465,16 +439,36 @@ func (es *EventSystem) SubscribeAcceptedHeads(headers chan *types.Header) *Subsc
 
 // SubscribePendingTxs creates a subscription that writes transaction hashes for
 // transactions that enter the transaction pool.
-func (es *EventSystem) SubscribePendingTxs(hashes chan []common.Hash) *Subscription {
+func (es *EventSystem) SubscribePendingTxs(crit interfaces.FilterQuery, hashes chan []common.Hash) *Subscription {
 	sub := &subscription{
-		id:        rpc.NewID(),
-		typ:       PendingTransactionsSubscription,
-		created:   time.Now(),
-		logs:      make(chan []*types.Log),
-		hashes:    hashes,
-		headers:   make(chan *types.Header),
-		installed: make(chan struct{}),
-		err:       make(chan error),
+		id:             rpc.NewID(),
+		typ:            PendingTransactionsSubscription,
+		pendingTxnCrit: crit,
+		created:        time.Now(),
+		logs:           make(chan []*types.Log),
+		hashes:         hashes,
+		headers:        make(chan *types.Header),
+		installed:      make(chan struct{}),
+		err:            make(chan error),
+	}
+	return es.subscribe(sub)
+}
+
+// SubscribePendingFullTxs creates a subscription that writes transaction hashes for
+// transactions that enter the transaction pool.
+func (es *EventSystem) SubscribePendingFullTxs(crit interfaces.FilterQuery, txs chan []*types.Transaction) *Subscription {
+	sub := &subscription{
+		id:             rpc.NewID(),
+		typ:            PendingTransactionsSubscription,
+		pendingTxnCrit: crit,
+		fullPendingTx:  true,
+		created:        time.Now(),
+		logs:           make(chan []*types.Log),
+		hashes:         make(chan []common.Hash),
+		txs:            txs,
+		headers:        make(chan *types.Header),
+		installed:      make(chan struct{}),
+		err:            make(chan error),
 	}
 	return es.subscribe(sub)
 }
@@ -543,18 +537,34 @@ func (es *EventSystem) handleRemovedLogs(filters filterIndex, ev core.RemovedLog
 }
 
 func (es *EventSystem) handleTxsEvent(filters filterIndex, ev core.NewTxsEvent, accepted bool) {
-	hashes := make([]common.Hash, 0, len(ev.Txs))
-	for _, tx := range ev.Txs {
-		hashes = append(hashes, tx.Hash())
-	}
-	for _, f := range filters[PendingTransactionsSubscription] {
-		f.hashes <- hashes
-	}
 	if accepted {
+		hashes := make([]common.Hash, 0, len(ev.Txs))
+		for _, tx := range ev.Txs {
+			hashes = append(hashes, tx.Hash())
+		}
 		for _, f := range filters[AcceptedTransactionsSubscription] {
 			f.hashes <- hashes
 		}
+		return
 	}
+
+	// accepted txn should not be in pending txn stream.
+	for _, f := range filters[PendingTransactionsSubscription] {
+		matchedTxns := filterTxns(ev.Txs, f.pendingTxnCrit.Addresses)
+		if len(matchedTxns) > 0 {
+			if f.fullPendingTx {
+				// send full txns
+				f.txs <- matchedTxns
+			} else {
+				hashes := make([]common.Hash, 0, len(matchedTxns))
+				for _, tx := range matchedTxns {
+					hashes = append(hashes, tx.Hash())
+				}
+				f.hashes <- hashes
+			}
+		}
+	}
+
 }
 
 func (es *EventSystem) handleChainEvent(filters filterIndex, ev core.ChainEvent) {

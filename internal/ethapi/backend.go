@@ -29,6 +29,7 @@ package ethapi
 
 import (
 	"context"
+
 	"math/big"
 	"time"
 
@@ -38,7 +39,7 @@ import (
 	"github.com/ava-labs/coreth/core/state"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/core/vm"
-	"github.com/ava-labs/coreth/eth/filters"
+	"github.com/ava-labs/coreth/eth/filters/backend"
 	"github.com/ava-labs/coreth/ethdb"
 	"github.com/ava-labs/coreth/params"
 	"github.com/ava-labs/coreth/rpc"
@@ -96,7 +97,7 @@ type Backend interface {
 
 	// eth/filters needs to be initialized from this backend type, so methods needed by
 	// it must also be included here.
-	filters.Backend
+	backend.Backend
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {

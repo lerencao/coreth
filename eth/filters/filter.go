@@ -336,6 +336,28 @@ func includes(addresses []common.Address, a common.Address) bool {
 	return false
 }
 
+// filterTxns create a slice of txn match the give criteria.
+func filterTxns(txns []*types.Transaction, tos []common.Address) []*types.Transaction {
+
+	if len(tos) == 0 {
+		return txns
+	}
+	var ret []*types.Transaction
+	for _, txn := range txns {
+
+		if txn.To() == nil {
+			continue
+		}
+
+		if !includes(tos, *txn.To()) {
+			continue
+		}
+		ret = append(ret, txn)
+	}
+
+	return ret
+}
+
 // filterLogs creates a slice of logs matching the given criteria.
 func filterLogs(logs []*types.Log, fromBlock, toBlock *big.Int, addresses []common.Address, topics [][]common.Hash) []*types.Log {
 	var ret []*types.Log

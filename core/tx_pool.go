@@ -1073,6 +1073,9 @@ func (pool *TxPool) Has(hash common.Hash) bool {
 func (pool *TxPool) HasLocal(hash common.Hash) bool {
 	return pool.all.GetLocal(hash) != nil
 }
+func (pool *TxPool) LocalCount() int {
+	return pool.all.LocalCount()
+}
 
 // removeTx removes a single transaction from the queue, moving all subsequent
 // transactions back to the future queue.

@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ava-labs/coreth/params"
 	"math/big"
 
 	"github.com/ava-labs/coreth/core/vm"
@@ -66,7 +67,9 @@ type Backend interface {
 
 	// Added to the backend interface to support limiting of logs requests
 	GetVMConfig() *vm.Config
+	ChainConfig() *params.ChainConfig
 	LastAcceptedBlock() *types.Block
+	CurrentHeader() *types.Header
 	GetMaxBlocksPerRequest() int64
 }
 
@@ -345,6 +348,28 @@ func includes(addresses []common.Address, a common.Address) bool {
 	}
 
 	return false
+}
+
+// filterTxns create a slice of txn match the give criteria.
+func filterTxns(txns []*types.Transaction, tos []common.Address) []*types.Transaction {
+
+	if len(tos) == 0 {
+		return txns
+	}
+	var ret []*types.Transaction
+	for _, txn := range txns {
+
+		if txn.To() == nil {
+			continue
+		}
+
+		if !includes(tos, *txn.To()) {
+			continue
+		}
+		ret = append(ret, txn)
+	}
+
+	return ret
 }
 
 // filterLogs creates a slice of logs matching the given criteria.

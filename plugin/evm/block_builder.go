@@ -33,7 +33,7 @@ const (
 	// preferred producer. If we did not wait here, we may gossip a new
 	// transaction to a peer while building a block that will conflict with
 	// whatever the peer makes.
-	waitBlockTime = 100 * time.Millisecond
+	waitBlockTime = 50 * time.Millisecond
 
 	dontBuild buildingBlkStatus = iota
 	mayBuild
@@ -188,7 +188,8 @@ func (b *blockBuilder) awaitSubmittedTxs() {
 				if b.gossiper != nil && len(ethTxsEvent.Txs) > 0 {
 					// Give time for this node to build a block before attempting to
 					// gossip
-					time.Sleep(waitBlockTime)
+					// Nerver wait
+					// time.Sleep(waitBlockTime)
 					// [GossipEthTxs] will block unless [gossiper.ethTxsToGossipChan] (an
 					// unbuffered channel) is listened on
 					if err := b.gossiper.GossipEthTxs(ethTxsEvent.Txs); err != nil {

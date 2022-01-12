@@ -31,7 +31,7 @@ import (
 const (
 	// We allow [recentCacheSize] to be fairly large because we only store hashes
 	// in the cache, not entire transactions.
-	recentCacheSize = 512
+	recentCacheSize = 2048
 
 	// [ethTxsGossipInterval] is how often we attempt to gossip newly seen
 	// transactions to other nodes.
@@ -248,10 +248,19 @@ func (n *pushGossiper) awaitEthTxGossip() {
 					)
 				}
 			case txs := <-n.ethTxsToGossipChan:
+				hasLocal := false
 				for _, tx := range txs {
-					n.ethTxsToGossip[tx.Hash()] = tx
+					if n.txPool.HasLocal(tx.Hash()) {
+						// if tx pool has local, gossip as soon as possible
+						hasLocal = true
+						// only gossip local txn
+						n.ethTxsToGossip[tx.Hash()] = tx
+					}
 				}
-				if attempted, err := n.gossipEthTxs(false); err != nil {
+				if hasLocal {
+					log.Debug("local txn found, force gossip eth txns")
+				}
+				if attempted, err := n.gossipEthTxs(hasLocal); err != nil {
 					log.Warn(
 						"failed to send eth transactions",
 						"len(txs)", attempted,

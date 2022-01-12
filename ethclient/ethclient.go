@@ -364,8 +364,13 @@ func (ec *client) SubscribeNewAcceptedTransactions(ctx context.Context, ch chan<
 }
 
 // SubscribeNewAcceptedTransactions subscribes to notifications about the accepted transaction hashes on the given channel.
-func (ec *client) SubscribeNewPendingTransactions(ctx context.Context, ch chan<- *common.Hash) (interfaces.Subscription, error) {
-	return ec.c.EthSubscribe(ctx, ch, "newPendingTransactions")
+// FIXME: replace FilterQuery with custom struct.
+func (ec *client) SubscribeNewPendingTransactions(ctx context.Context, q interfaces.FilterQuery, ch chan<- *common.Hash) (interfaces.Subscription, error) {
+	arg, err := toFilterArg(q)
+	if err != nil {
+		return nil, err
+	}
+	return ec.c.EthSubscribe(ctx, ch, "newPendingTransactions", arg)
 }
 
 // SubscribeNewHead subscribes to notifications about the current blockchain head

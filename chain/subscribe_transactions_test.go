@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"github.com/ava-labs/coreth/interfaces"
 	"math/big"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestSubscribeTransactions(t *testing.T) {
 	acceptedTxsEvents := eventSystem.SubscribeAcceptedTxs(acceptedTxsEventsChannel)
 
 	pendingTxsEventsChannel := make(chan []common.Hash)
-	pendingTxsEvents := eventSystem.SubscribePendingTxs(pendingTxsEventsChannel)
+	pendingTxsEvents := eventSystem.SubscribePendingTxs(interfaces.FilterQuery{}, pendingTxsEventsChannel)
 
 	chain.Start()
 	defer chain.Stop()

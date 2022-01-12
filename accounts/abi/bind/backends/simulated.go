@@ -883,6 +883,12 @@ func (fb *filterBackend) LastAcceptedBlock() *types.Block {
 func (fb *filterBackend) GetMaxBlocksPerRequest() int64 {
 	return eth.DefaultSettings.MaxBlocksPerRequest
 }
+func (fb *filterBackend) CurrentHeader() *types.Header {
+	return fb.bc.CurrentHeader()
+}
+func (fb *filterBackend) ChainConfig() *params.ChainConfig {
+	return fb.bc.Config()
+}
 
 func (fb *filterBackend) ChainDb() ethdb.Database  { return fb.db }
 func (fb *filterBackend) EventMux() *event.TypeMux { panic("not supported") }

@@ -40,7 +40,7 @@ const (
 	// preferred producer. If we did not wait here, we may gossip a new
 	// transaction to a peer while building a block that will conflict with
 	// whatever the peer makes.
-	waitBlockTime = 100 * time.Millisecond
+	waitBlockTime = 50 * time.Millisecond
 
 	dontBuild        buildingBlkStatus = iota
 	conditionalBuild                   // Only used prior to AP4

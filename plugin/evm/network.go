@@ -257,10 +257,7 @@ func (n *pushNetwork) awaitEthTxGossip() {
 		for {
 			select {
 			case <-gossipTicker.C:
-				// if tx pool has local, gossip as soon as possible
-				localCount := n.chain.GetTxPool().LocalCount()
-				forceGossip := localCount > 0
-				if attempted, err := n.gossipEthTxs(forceGossip); err != nil {
+				if attempted, err := n.gossipEthTxs(false); err != nil {
 					log.Warn(
 						"failed to send eth transactions",
 						"len(txs)", attempted,
@@ -279,13 +276,21 @@ func (n *pushNetwork) awaitEthTxGossip() {
 					)
 				}
 			case txs := <-n.ethTxsToGossipChan:
+				pool := n.chain.GetTxPool()
+				hasLocal := false
 				for _, tx := range txs {
 					n.ethTxsToGossip[tx.Hash()] = tx
+					// if tx pool has local, gossip as soon as possible
+					if !hasLocal {
+						if pool.HasLocal(tx.Hash()) {
+							hasLocal = true
+						}
+					}
 				}
-				// if tx pool has local, gossip as soon as possible
-				localCount := n.chain.GetTxPool().LocalCount()
-				forceGossip := localCount > 0
-				if attempted, err := n.gossipEthTxs(forceGossip); err != nil {
+				if hasLocal {
+					log.Debug("local txn found, force gossip eth txns")
+				}
+				if attempted, err := n.gossipEthTxs(hasLocal); err != nil {
 					log.Warn(
 						"failed to send eth transactions",
 						"len(txs)", attempted,

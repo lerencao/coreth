@@ -279,12 +279,11 @@ func (n *pushNetwork) awaitEthTxGossip() {
 				pool := n.chain.GetTxPool()
 				hasLocal := false
 				for _, tx := range txs {
-					n.ethTxsToGossip[tx.Hash()] = tx
-					// if tx pool has local, gossip as soon as possible
-					if !hasLocal {
-						if pool.HasLocal(tx.Hash()) {
-							hasLocal = true
-						}
+					if pool.HasLocal(tx.Hash()) {
+						// if tx pool has local, gossip as soon as possible
+						hasLocal = true
+						// only gossip local txn
+						n.ethTxsToGossip[tx.Hash()] = tx
 					}
 				}
 				if hasLocal {

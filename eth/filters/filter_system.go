@@ -90,8 +90,10 @@ type subscription struct {
 	created        time.Time
 	logsCrit       interfaces.FilterQuery
 	pendingTxnCrit interfaces.FilterQuery
+	fullPendingTx  bool
 	logs           chan []*types.Log
 	hashes         chan []common.Hash
+	txs            chan []*types.Transaction
 	headers        chan *types.Header
 	installed      chan struct{} // closed when the filter is installed
 	err            chan error    // closed when the filter is uninstalled
@@ -195,6 +197,7 @@ func (sub *Subscription) Unsubscribe() {
 				break uninstallLoop
 			case <-sub.f.logs:
 			case <-sub.f.hashes:
+			case <-sub.f.txs:
 			case <-sub.f.headers:
 			}
 		}
@@ -392,6 +395,25 @@ func (es *EventSystem) SubscribePendingTxs(crit interfaces.FilterQuery, hashes c
 	return es.subscribe(sub)
 }
 
+// SubscribePendingFullTxs creates a subscription that writes transaction hashes for
+// transactions that enter the transaction pool.
+func (es *EventSystem) SubscribePendingFullTxs(crit interfaces.FilterQuery, txs chan []*types.Transaction) *Subscription {
+	sub := &subscription{
+		id:             rpc.NewID(),
+		typ:            PendingTransactionsSubscription,
+		pendingTxnCrit: crit,
+		fullPendingTx:  true,
+		created:        time.Now(),
+		logs:           make(chan []*types.Log),
+		hashes:         make(chan []common.Hash),
+		txs:            txs,
+		headers:        make(chan *types.Header),
+		installed:      make(chan struct{}),
+		err:            make(chan error),
+	}
+	return es.subscribe(sub)
+}
+
 // SubscribeAcceptedTxs creates a subscription that writes transaction hashes for
 // transactions have been accepted.
 func (es *EventSystem) SubscribeAcceptedTxs(hashes chan []common.Hash) *Subscription {
@@ -459,11 +481,16 @@ func (es *EventSystem) handleTxsEvent(filters filterIndex, ev core.NewTxsEvent, 
 	for _, f := range filters[PendingTransactionsSubscription] {
 		matchedTxns := filterTxns(ev.Txs, f.pendingTxnCrit.Addresses)
 		if len(matchedTxns) > 0 {
-			hashes := make([]common.Hash, 0, len(matchedTxns))
-			for _, tx := range matchedTxns {
-				hashes = append(hashes, tx.Hash())
+			if f.fullPendingTx {
+				// send full txns
+				f.txs <- matchedTxns
+			} else {
+				hashes := make([]common.Hash, 0, len(matchedTxns))
+				for _, tx := range matchedTxns {
+					hashes = append(hashes, tx.Hash())
+				}
+				f.hashes <- hashes
 			}
-			f.hashes <- hashes
 		}
 	}
 	if accepted {

@@ -182,6 +182,43 @@ func (api *PublicFilterAPI) NewPendingTransactions(ctx context.Context, crit Fil
 	return rpcSub, nil
 }
 
+// NewPendingFullTransactions creates a subscription that is triggered each time a transaction
+// enters the transaction pool and was signed from one of the transactions this nodes manages.
+func (api *PublicFilterAPI) NewPendingFullTransactions(ctx context.Context, crit FilterCriteria) (*rpc.Subscription, error) {
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	go func() {
+		pendingTxs := make(chan []*types.Transaction, 128)
+		pendingTxSub := api.events.SubscribePendingFullTxs(interfaces.FilterQuery(crit), pendingTxs)
+
+		for {
+			select {
+			case txns := <-pendingTxs:
+				// To keep the original behaviour, send a single tx in one notification.
+				// TODO(rjl493456442) Send a batch of txs in one notification
+				for _, tx := range txns {
+					if tx != nil {
+						notifier.Notify(rpcSub.ID, &tx)
+					}
+				}
+			case <-rpcSub.Err():
+				pendingTxSub.Unsubscribe()
+				return
+			case <-notifier.Closed():
+				pendingTxSub.Unsubscribe()
+				return
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
 // NewAcceptedTransactions creates a subscription that is triggered each time a transaction is accepted.
 func (api *PublicFilterAPI) NewAcceptedTransactions(ctx context.Context) (*rpc.Subscription, error) {
 	notifier, supported := rpc.NotifierFromContext(ctx)

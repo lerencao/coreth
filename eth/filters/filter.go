@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ava-labs/coreth/params"
 	"math/big"
 
 	"github.com/ava-labs/coreth/core/vm"
@@ -66,7 +67,9 @@ type Backend interface {
 
 	// Added to the backend interface to support limiting of logs requests
 	GetVMConfig() *vm.Config
+	ChainConfig() *params.ChainConfig
 	LastAcceptedBlock() *types.Block
+	CurrentHeader() *types.Header
 	GetMaxBlocksPerRequest() int64
 }
 
